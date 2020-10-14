@@ -29,7 +29,7 @@
 
 @property (nonatomic) BOOL showSearch;
 @property (nonatomic) UIImageView *centerIndexingView;
-@property (nonatomic) ThemeBaseLabel *centerIndexingLabel;
+@property (nonatomic) UILabel *centerIndexingLabel;
 
 @end
 
@@ -158,7 +158,7 @@
         UIScrollView *scrollView = (UIScrollView *)newSuperview;
         scrollView.delaysContentTouches = NO;
         [scrollView addObserver:self forKeyPath:kObservingKeyPath options:0 context:kObservingContext];
-        DDLogDebug(@"[GDIIndexBar] WARNING: Adding a GDIIndexBar as a subview of a UIScrollView will cause `delaysContentTouches` to be set to `NO`.");
+        //DDLogDebug(@"[GDIIndexBar] WARNING: Adding a GDIIndexBar as a subview of a UIScrollView will cause `delaysContentTouches` to be set to `NO`.");
     }
     if (newSuperview == nil && [self.superview isKindOfClass:[UIScrollView class]]) {
         UIScrollView *scrollView = (UIScrollView *)self.superview;
@@ -723,10 +723,10 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
     imageView.contentMode = UIViewContentModeScaleAspectFit;
     imageView.frame = CGRectMake(0, 0, 60.f, 60.f);
     imageView.alpha = 0.f;
-    ThemeBaseLabel *label = [[ThemeBaseLabel alloc] initWithFrame:imageView.frame];
+    UILabel *label = [[UILabel alloc] initWithFrame:imageView.frame];
     label.textAlignment = NSTextAlignmentCenter;
     label.textColor = [UIColor whiteColor];
-    label.font = [[ThemeBaseManager defaultManager] mediumFontOfSize:28.f]; //[UIFont systemFontOfSize:28.f weight:UIFontWeightMedium];
+    label.font = [UIFont systemFontOfSize:28.f weight:UIFontWeightMedium];
     [imageView addSubview:label];
     self.centerIndexingLabel = label;
     self.centerIndexingView = imageView;
@@ -772,5 +772,12 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
     }
 }
 
+- (UIFont *)centerIndexingLabelFont {
+    return self.centerIndexingLabel.font;
+}
+
+- (void)setCenterIndexingLabelFont:(UIFont *)font {
+    self.centerIndexingLabel.font = font;
+}
 
 @end

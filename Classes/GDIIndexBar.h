@@ -168,6 +168,8 @@ typedef enum {
 // selected background color
 @property (nonatomic) UIColor *barBackgroundSelectedColor;
 
+@property (nonatomic) UIColor *centerIndexingLabelFont;
+
 @end
 
 
