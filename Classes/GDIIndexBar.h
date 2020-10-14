@@ -155,6 +155,19 @@ typedef enum {
  */
 - (CGRect)rectForBarBackgroundView;
 
+// customizing for indexbar hiding
+@property (assign, nonatomic) NSTimeInterval hidingDelayTime;
+
+- (void)show;
+
+- (void)hide;
+
+// search button
+- (void)showSearchButton:(BOOL)show; // Default : NO
+
+// selected background color
+@property (nonatomic) UIColor *barBackgroundSelectedColor;
+
 @end
 
 
@@ -183,5 +196,7 @@ typedef enum {
  * Informs the delegate the user has touched the index bar at the specified index.
  */
 - (void)indexBar:(GDIIndexBar *)indexBar didSelectIndex:(NSUInteger)index;
+
+- (void)indexBarDidSelectSearchButton:(GDIIndexBar *)indexBar;
 
 @end

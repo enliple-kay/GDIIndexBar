@@ -12,12 +12,26 @@
 #define kObservingKeyPath @"bounds"
 #define kDefaultBarBackgroundWidth 25.f
 #define kDefaultBarBackgroundWidthiOS7 15.f
-#define kDefaultFontName @"HelveticaNeue-Bold"
+#define kDefaultFontName @".SFUIText-Bold"
 #define kDefaultFontSize 11.f
-#define kDefaultTextSpacing 2.f
+#define kDefaultTextSpacing 8.f
 #define kDefaultTruncatedRowText @"•"
 #define kStandardButtonWidth 44.f
 #define kShowDebugOutlines 0
+#define kDefaultInsetTop    32.f
+#define kDefaultInsetBottom 10.f
+#define kDefaultHidingDelay 1.0 // seconds
+#define kDefaultBarBackgroundSelectedColor [UIColor colorWithRed:0.f green:0.f blue:0.f alpha:.4f]
+
+#define kDefaultIndexAnimationDuration 0.25
+
+@interface GDIIndexBar ()
+
+@property (nonatomic) BOOL showSearch;
+@property (nonatomic) UIImageView *centerIndexingView;
+@property (nonatomic) ThemeBaseLabel *centerIndexingLabel;
+
+@end
 
 @implementation GDIIndexBar {
     NSUInteger _numberOfIndexes;
@@ -95,9 +109,13 @@
 - (void)initIndexBar
 {
     _lastSelectedStringIndex = NSNotFound;
-
+    _hidingDelayTime = kDefaultHidingDelay;
+    _barBackgroundSelectedColor = kDefaultBarBackgroundSelectedColor;
+    _showSearch = NO;
+    
     self.exclusiveTouch = YES;
     self.multipleTouchEnabled = NO;
+    self.alpha = 0.f;
     
     [self applyDefaultStyle];
     
@@ -125,6 +143,8 @@
                                              selector:@selector(handleKeyboardFrameChange:)
                                                  name:UIKeyboardDidHideNotification
                                                object:nil];
+    
+    [self createCenterIndexingView];
 }
 
 - (void)dealloc
@@ -138,7 +158,7 @@
         UIScrollView *scrollView = (UIScrollView *)newSuperview;
         scrollView.delaysContentTouches = NO;
         [scrollView addObserver:self forKeyPath:kObservingKeyPath options:0 context:kObservingContext];
-        NSLog(@"[GDIIndexBar] WARNING: Adding a GDIIndexBar as a subview of a UIScrollView will cause `delaysContentTouches` to be set to `NO`.");
+        DDLogDebug(@"[GDIIndexBar] WARNING: Adding a GDIIndexBar as a subview of a UIScrollView will cause `delaysContentTouches` to be set to `NO`.");
     }
     if (newSuperview == nil && [self.superview isKindOfClass:[UIScrollView class]]) {
         UIScrollView *scrollView = (UIScrollView *)self.superview;
@@ -154,12 +174,22 @@
     NSAssert([self.delegate respondsToSelector:@selector(stringForIndex:)], @"Delegate must implement stringForIndex:");
     NSAssert(self.tableView, @"Table view cannot be nil.");
     
-    _numberOfIndexes = [self.delegate numberOfIndexesForIndexBar:self];
-    _lineHeight = [@"0" sizeWithFont:self.textFont].height;
+    _numberOfIndexes = [self.delegate numberOfIndexesForIndexBar:self] + (_showSearch ? 1 : 0);
+    _lineHeight = [@"0" sizeWithAttributes:@{NSFontAttributeName : self.textFont}].height;
     _indexStrings = [NSMutableArray array];
     
     for (int i = 0; i < _numberOfIndexes; i++) {
-        [_indexStrings addObject:[self.delegate stringForIndex:i]];
+        if (_showSearch) {
+            if (i == 0) {
+                [_indexStrings addObject:@"{search}"];
+            }
+            else {
+                [_indexStrings addObject:[self.delegate stringForIndex:i-1]];
+            }
+        }
+        else {
+            [_indexStrings addObject:[self.delegate stringForIndex:i]];
+        }
     }
     
     [self setNeedsLayout];
@@ -189,7 +219,7 @@
     }
 }
 
-#pragma mark - Keyboard 
+#pragma mark - Keyboard
 
 - (void)handleKeyboardFrameChange:(NSNotificationCenter *)note
 {
@@ -275,14 +305,23 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
 
 - (CGRect)rectForIndexBarFrame
 {
-    CGPoint relativeTableViewTopRightPoint = [_tableView convertPoint:CGPointMake(_tableView.frame.size.width, 0)
+    CGFloat desiredTextHeight = [self desiredHeight];
+    CGFloat offsetHeight = (_tableView.tableHeaderView ? _tableView.tableHeaderView.frame.size.height : 0) + kDefaultInsetTop;
+    CGPoint relativeTableViewTopRightPoint = [_tableView convertPoint:CGPointMake(_tableView.frame.size.width, offsetHeight)
                                                                toView:self.superview];
     CGPoint origin = CGPointMake(relativeTableViewTopRightPoint.x - _barWidth,
                                  relativeTableViewTopRightPoint.y + _tableView.contentOffset.y + _tableView.contentInset.top);
     
-    CGFloat height = _tableView.frame.size.height - (_tableView.contentInset.top + _tableView.contentInset.bottom);
+    CGFloat height = _tableView.frame.size.height - offsetHeight - (_tableView.contentInset.top + _tableView.contentInset.bottom) - kDefaultInsetBottom;
     
     CGSize size = CGSizeMake(_barWidth, height);
+    
+    if (desiredTextHeight < size.height) {
+        CGFloat heightGap = (size.height - desiredTextHeight);
+        origin.y += heightGap * 0.5;
+        size.height -= heightGap;
+    }
+    
     return (CGRect){ origin, size };
 }
 
@@ -291,13 +330,6 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
 {
     CGFloat indexRowHeight = _textSpacing + _lineHeight;
     CGFloat height = indexRowHeight * [self numberOfDisplayableRows] + _textSpacing * 2;
-    CGRect parentInsetRect = [_tableView.superview convertRect:_tableView.frame
-                                                        toView:self.superview];
-    
-    if ([self.superview isKindOfClass:[UIScrollView class]]) {
-        UIScrollView *scrollView = (UIScrollView *)self.superview;
-        parentInsetRect = UIEdgeInsetsInsetRect(scrollView.frame, scrollView.contentInset);
-    }
     
     CGFloat yp;
     switch (_verticalAlignment) {
@@ -393,20 +425,23 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
     
     for (int i = 0; i < indexCount; i++) {
         NSString *text = [_displayedIndexStrings objectAtIndex:i];
-        CGSize textSize = [text sizeWithFont:self.textFont];
+        CGSize textSize = [text sizeWithAttributes:@{NSFontAttributeName : self.textFont}];
         CGPoint point = CGPointMake(rect.size.width * .5 - textSize.width * .5 + _textOffset.horizontal, yp);
         CGPoint shadowPoint = CGPointAdd(point, CGPointMake(self.textShadowOffset.horizontal, self.textShadowOffset.vertical));
         
-        // draw shadow color
-        [self.textShadowColor set];
-        [text drawInRect:CGRectMake(shadowPoint.x, shadowPoint.y, textSize.width, _lineHeight)
-                withFont:self.textFont];
-        
-        // draw normal color
-        [self.textColor set];
-        [text drawInRect:CGRectMake(point.x, point.y, textSize.width, _lineHeight)
-                withFont:self.textFont];
-        
+        if ([text isEqualToString:@"{search}"]) {
+            UIImage *searchImage = [UIImage imageNamed:@"ic_index_search"];
+            [searchImage drawAtPoint:CGPointMake(rect.size.width * .5 - searchImage.size.width * .5 + _textOffset.horizontal, yp)];
+        }
+        else {
+            // draw shadow color
+            [text drawInRect:CGRectMake(shadowPoint.x, shadowPoint.y, textSize.width, _lineHeight)
+              withAttributes:@{NSFontAttributeName : self.textFont, NSForegroundColorAttributeName : self.textShadowColor}];
+            
+            // draw normal color
+            [text drawInRect:CGRectMake(point.x, point.y, textSize.width, _lineHeight)
+              withAttributes:@{NSFontAttributeName : self.textFont, NSForegroundColorAttributeName: self.textColor}];
+        }
         yp += _lineHeight + _textSpacing;
     }
 }
@@ -421,6 +456,9 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
         self.highlighted = CGRectContainsPoint([self rectForTextArea], [_currentTouch locationInView:self]);
         [self handleTouch:_currentTouch];
     }
+    
+    [self setupBarBackgroundViewColor:_barBackgroundSelectedColor];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hide) object:nil];
 }
 
 - (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
@@ -429,6 +467,8 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
         self.highlighted = CGRectContainsPoint([self rectForTextArea], [_currentTouch locationInView:self]);
         [self handleTouch:_currentTouch];
     }
+    [self setupBarBackgroundViewColor:_barBackgroundSelectedColor];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hide) object:nil];
 }
 
 - (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
@@ -438,6 +478,9 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
         _currentTouch = nil;
     }
     _lastSelectedStringIndex = NSNotFound;
+    [self setupBarBackgroundViewColor:_barBackgroundColor];
+    [self hideCenterIndexingView];
+    [self performSelector:@selector(hide) withObject:nil afterDelay:_hidingDelayTime];
 }
 
 - (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event
@@ -447,18 +490,41 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
         _currentTouch = nil;
     }
     _lastSelectedStringIndex = NSNotFound;
+    [self setupBarBackgroundViewColor:_barBackgroundColor];
+    [self hideCenterIndexingView];
+    [self performSelector:@selector(hide) withObject:nil afterDelay:_hidingDelayTime];
 }
 
 - (void)handleTouch:(UITouch *)touch
 {
+    CGPoint touchPoint = [touch locationInView:self];
+    CGRect textAreaRect = [self rectForTextArea];
+    CGFloat progress = fmaxf(0.f, fminf((touchPoint.y - textAreaRect.origin.y) / textAreaRect.size.height, .999f));
+    NSUInteger stringIndex = floorf(progress * _indexStrings.count);
+    if (_showSearch) {
+        if (stringIndex == 0) {
+            if ([self.delegate respondsToSelector:@selector(indexBarDidSelectSearchButton:)]) {
+                if (NSUIntegerMax != _lastSelectedStringIndex) {
+                    [self.delegate indexBarDidSelectSearchButton:self];
+                    _lastSelectedStringIndex = NSUIntegerMax;
+                }
+            }
+        }
+        else {
+            [self propagateSelectionByIndex:stringIndex - 1];
+        }
+    }
+    else {
+        [self propagateSelectionByIndex:stringIndex];
+    }
+    [self showCenterIndexingView];
+}
+
+- (void)propagateSelectionByIndex:(NSUInteger)index {
     if ([self.delegate respondsToSelector:@selector(indexBar:didSelectIndex:)]) {
-        CGPoint touchPoint = [touch locationInView:self];
-        CGRect textAreaRect = [self rectForTextArea];
-        CGFloat progress = fmaxf(0.f, fminf((touchPoint.y - textAreaRect.origin.y) / textAreaRect.size.height, .999f));
-        NSUInteger stringIndex = floorf(progress * _indexStrings.count);
-        if (stringIndex != _lastSelectedStringIndex) {
-            [self.delegate indexBar:self didSelectIndex:stringIndex];
-            _lastSelectedStringIndex = stringIndex;
+        if (index != _lastSelectedStringIndex) {
+            [self.delegate indexBar:self didSelectIndex:index];
+            _lastSelectedStringIndex = index;
         }
     }
 }
@@ -583,8 +649,12 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
     _barBackgroundColor = barBackgroundColor;
     [self didChangeValueForKey:@"barBackgroundColor"];
     
+    [self setupBarBackgroundViewColor:barBackgroundColor];
+}
+
+- (void)setupBarBackgroundViewColor:(UIColor *)color {
     if (_barBackgroundView) {
-        _barBackgroundView.backgroundColor = barBackgroundColor;
+        _barBackgroundView.backgroundColor = color;
         [self setNeedsDisplay];
     }
 }
@@ -610,5 +680,97 @@ CGPoint CGPointAdd(CGPoint point1, CGPoint point2) {
     }
     return _barBackgroundView;
 }
+
+- (void)show {
+    if (self.isHidden && self.alpha == 1.f) {
+        self.alpha = 0.f;
+    }
+    else {
+        if (self.alpha == 0.f) {
+            [UIView animateWithDuration:kDefaultIndexAnimationDuration animations:^{
+                self.alpha = 1.f;
+            }];
+        }
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hide) object:nil];
+        [self performSelector:@selector(hide) withObject:nil afterDelay:_hidingDelayTime];
+    }
+}
+
+- (void)hide {
+    if (self.isHidden && self.alpha == 1.f) {
+        self.alpha = 0.f;
+    }
+    else {
+        if (self.alpha == 1.f) {
+            [UIView animateWithDuration:kDefaultIndexAnimationDuration animations:^{
+                self.alpha = 0.f;
+            }];
+        }
+    }
+}
+
+- (void)showSearchButton:(BOOL)show {
+    _showSearch = show;
+    if (_tableView && _delegate) {
+        [self reload];
+    }
+}
+
+#pragma mark - Center Indexing View
+
+- (void)createCenterIndexingView {
+    UIImageView *imageView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"img_indexing_letter_box"]];
+    imageView.contentMode = UIViewContentModeScaleAspectFit;
+    imageView.frame = CGRectMake(0, 0, 60.f, 60.f);
+    imageView.alpha = 0.f;
+    ThemeBaseLabel *label = [[ThemeBaseLabel alloc] initWithFrame:imageView.frame];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.textColor = [UIColor whiteColor];
+    label.font = [[ThemeBaseManager defaultManager] mediumFontOfSize:28.f]; //[UIFont systemFontOfSize:28.f weight:UIFontWeightMedium];
+    [imageView addSubview:label];
+    self.centerIndexingLabel = label;
+    self.centerIndexingView = imageView;
+    [self.tableView.superview addSubview:self.centerIndexingView];
+}
+
+- (void)showCenterIndexingView {
+    if (_lastSelectedStringIndex == NSNotFound ||
+        _lastSelectedStringIndex == NSUIntegerMax) {
+        [self hideCenterIndexingView];
+        return;
+    }
+    self.centerIndexingLabel.text = [self.delegate stringForIndex:_lastSelectedStringIndex];
+    if (self.centerIndexingView.alpha == 0.f) {
+        [self addCenterIndexingViewToSuperView];
+        self.centerIndexingView.alpha = 1.f;
+    }else{
+        [self.tableView.superview bringSubviewToFront:self.centerIndexingView];
+    }
+}
+
+- (void)addCenterIndexingViewToSuperView {
+    if (self.tableView.superview != nil) {
+        CGPoint centerPoint = self.tableView.center;
+        CGSize viewSize = self.centerIndexingView.frame.size;
+        CGFloat viewX = centerPoint.x - viewSize.width * 0.5;
+        CGFloat viewY = centerPoint.y - viewSize.height * 0.5;
+        [self.centerIndexingView setFrame:CGRectMake(viewX, viewY, viewSize.width, viewSize.height)];
+    }
+}
+
+- (void)hideCenterIndexingView {
+    if (self.centerIndexingView && self.centerIndexingView.alpha == 1.f) {
+        [UIView animateWithDuration:kDefaultIndexAnimationDuration animations:^{
+            self.centerIndexingView.alpha = 0.f;
+        } completion:^(BOOL finished) {
+            if (finished) {
+                self.centerIndexingView.alpha = 0.f;
+//                [self.centerIndexingView removeFromSuperview];
+//                self.centerIndexingView = nil;
+            }
+        }];
+    }
+}
+
 
 @end
